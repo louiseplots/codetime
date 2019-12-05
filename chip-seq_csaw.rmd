@@ -1,0 +1,79 @@
+**Differential binding analysis of ChIP-seq data with csaw, incorporating spike-in normalisation.**
+
+This requires BAM files (.bam) and their associated index files (.bai).
+
+Based on Aaron Lun & Gordon Smyth's F1000 paper: <https://f1000research.com/articles/4-1080>.
+
+#Loading necessary packages
+library(csaw)
+library(edgeR)
+library(rtracklayer)
+
+#Setting read parameters (remove blacklisted areas, use standard chromosomes, set Paired End mode, restrict fragment length to 800bp
+ch <- import.chain("mm9ToMm10.over.chain")
+original <- import("mm9-blacklist.bed")
+blacklist <- liftOver(x=original, chain=ch)
+blacklist <- unlist(blacklist)
+standard.chr <- paste0("chr", c(1:19,"X","Y"))
+param <- readParam(pe="both", max.frag=800, discard=blacklist, restrict=standard.chr)
+
+#Importing BAM files
+bam.files <- c(BAM_FILENAMES)
+
+#Counting reads into windows, with window width 20bp (narrow, for transcription factor), extension 175bp (mean fragment length across libraries)
+data <- windowCounts(bam.files, param=param, width=20, ext=175)
+
+#Filtering windows, based on background signal from surrounding local 10kbp, and with minimum log2 fold-change of 3
+surrounds <- 10000
+neighbour <- suppressWarnings(resize(rowRanges(data), surrounds, fix="center"))
+wider <- regionCounts(bam.files, regions=neighbour, ext=175, param=param)
+filter.stat <- filterWindows(data, wider, type="local")
+keep <- filter.stat$filter > log2(3)
+filtered.data <- data[keep,]
+summary(keep)
+
+#Creating spike-in normalisation factors
+spike.ch <- import.chain("dm3toDm6.over.chain")
+spike.original <- import("dm3-blacklist.bed")
+spike.blacklist <- liftOver(x=spike.original, chain=spike.ch)
+spike.blacklist <- unlist(spike.blacklist)
+spike.param <- readParam(pe="both", max.frag=800, discard=spike.blacklist)
+spike.files <- c(SPIKE-IN_BAM_FILENAMES)
+spike.data <- windowCounts(spike.files, param=spike.param)
+spike.data$totals
+spike.facs <- normOffsets(spike.data, lib.sizes=data$totals)
+spike.facs
+
+#Differential binding analysis incorporating spike-in normalisation
+y <- asDGEList(filtered.data, norm.factors=spike.facs)
+group <- factor(c(GROUP A, GROUP B))
+design <- model.matrix(~0+group)
+colnames(design) <- levels(group)
+y <- estimateDisp(y, design)
+fit <- glmQLFit(y, design, robust=TRUE)
+
+contrast <- makeContrasts(GROUP A - GROUP B, levels=design)
+results <- glmQLFTest(fit, contrast = contrast)
+
+#Controlling FDR by merging regions into closters of maximum 5kbp length, minimum 100bp apart
+merged <- mergeWindows(rowRanges(filtered.data), tol=100, max.width=5000)
+
+#Calculating combined p-values for each cluster
+tabcom <- combineTests(merged$id, results$table)
+
+#Weighting windows on abundance
+tab.ave <- getBestTest(merged$id, results$table, by.pval=FALSE)
+weights <- upweightSummit(merged$id, tab.ave$best)
+tabcom.w <- combineTests(merged$id, results$table, weight=weights)
+
+#Selecting differentially-bound clusters with FDR below 0.05
+is.sig <- tabcom.w$FDR <= 0.05
+summary(is.sig)
+
+#Exporting data
+out.ranges <- merged$region
+elementMetadata(out.ranges) <- data.frame(tabcom.w, best.pos=mid(ranges(rowRanges(filtered.data[tab.ave$best]))), best.logFC=tab.ave$logFC)
+simplified <- out.ranges[is.sig]
+write.csv(simplified, file="RESULTS.CSV")
+simplified$score <- -10*log10(simplified$FDR)
+export(con="RESULTS.BED", object=simplified)
