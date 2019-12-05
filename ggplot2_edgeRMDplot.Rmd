@@ -1,0 +1,39 @@
+#How to make a custom MD plot from edgeR output
+
+#Load ggplot2
+library(ggplot2)
+
+#Import the edgeR output txt file, the one starting res_...
+
+data <- read.delim("res_etc.txt", header = TRUE, sep = "\t")
+
+#Add a column to specify whether a point should be shown as red (sig.upregulated), blue (sig.downregulated), grey (neither)
+
+data$fill <- ifelse(data$FDR < 0.05 & data$logFC > 0, "blue", ifelse(data$FDR < 0.05 & data$logFC < 0, "red", "gray"))
+
+#Subset this data so that points can be plotted as layers
+data_up <- data[data$fill=="blue",]
+data_down <- data[data$fill=="red",]
+data_ns <- data[data$fill=="gray",]
+
+#Draw a plot
+
+png("MDplot.png",width=6,height=4,units="in",res=600)
+
+ggplot() + 
+#alpha is the transparency of the points
+  geom_point(aes(x = data_ns$logCPM, y = data_ns$logFC), colour = "gray", size = 1, alpha = 0.4) + 
+  geom_point(aes(x = data_up$logCPM, y = data_up$logFC), colour = "blue", size = 2, alpha = 0.6) +
+  geom_point(aes(x = data_down$logCPM, y = data_down$logFC), colour = "red", size = 2, alpha = 0.6) +
+#base_size is the text size
+  theme_bw(base_size = 24) + 
+#set the axes limits and labels
+  xlim(-3,17) + 
+  ylim(-7.5,7.5) + 
+  xlab("Average logCPM") + 
+  ylab("logFC") + 
+  #remove the gridlines
+  theme(panel.grid = element_blank())
+
+#Export the plot as a PNG file
+dev.off()
