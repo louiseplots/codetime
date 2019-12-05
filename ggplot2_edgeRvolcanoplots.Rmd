@@ -1,0 +1,35 @@
+#How to make a custom volcano plot from edgeR output
+
+#Load ggplot2
+library(ggplot2)
+
+#Import the edgeR output txt file, the one starting res_...
+
+data <- read.delim("res_etc.txt", header = TRUE, sep = "\t")
+
+#Add a column to specify whether a point should be shown as red (sig.upregulated), blue (sig.downregulated), grey (neither)
+
+data$fill <- ifelse(data$FDR < 0.05 & data$logFC > 0, "blue", ifelse(data$FDR < 0.05 & data$logFC < 0, "red", "gray"))
+
+#Subset this data so that points can be plotted as layers
+data_up <- data[data$fill=="blue",]
+data_down <- data[data$fill=="red",]
+data_ns <- data[data$fill=="gray",]
+
+ggplot() + 
+#alpha is the transparency of the points
+  geom_point(aes(x = data_ns$logFC, y = -log10(data_ns$FDR)), colour = "gray", size = 1, alpha = 0.4) + 
+  geom_point(aes(x = data_up$logFC, y = -log10(data_up$FDR)), colour = "blue", size = 2, alpha = 0.3) +
+  geom_point(aes(x = data_down$logFC, y = -log10(data_down$FDR)), colour = "red", size = 2, alpha = 0.3) +
+#base_size is the text size
+  theme_bw(base_size = 20) + 
+#set the axes limits and labels
+  xlim(-8,8) + 
+  #ylim(-10,10) + 
+  xlab("log(FC)") + 
+  ylab("-log10(FDR)") + 
+#remove the gridlines
+  theme(panel.grid = element_blank()) + 
+#these next two lines will add labels, but will make for a very complex plot if you have lots of significant results. Delete or add # beforehand to ignore
+  geom_text_repel(aes(x = data_up$logFC, y = -log10(data_up$FDR), label = data_up$SYMBOL), colour = "blue", size = 5) + 
+  geom_text_repel(aes(x = data_down$logFC, y = -log10(data_down$FDR), label = data_down$SYMBOL), colour = "red3", size = 5)
